@@ -25,6 +25,7 @@ namespace PPTP
 	class KMeanAlgoParTbb
 	{
 	public:
+		//constructor
 		KMeanAlgoParTbb(int nb_channels, int nb_centroids, int nb_iterations, int nb_threads)
 	    : nb_channels(nb_channels)
 		, m_nb_centroid(nb_centroids)
@@ -35,9 +36,10 @@ namespace PPTP
 		updated_centroids.resize(m_nb_centroid*nb_channels*nb_threads);
 		m_centroids.resize(m_nb_centroid*nb_channels);
 	    }
+		//destructor
 		virtual ~KMeanAlgoParTbb() {}
 		
-
+		// compute the new value of the centroids
 		bool compute_centroids_tbb(cv::Mat const& image)
 		{
 			using namespace cv ;
@@ -56,14 +58,15 @@ namespace PPTP
 			
 			switch(nb_channels)
 			{
+				// if there is only one color channel	
 				case 1:
 				{
 					//TO PARALLELISE
 					tbb::parallel_for(size_t(0), (size_t)nb_threads, [&](std::size_t id_thread){
 						
-						/*****SPLIT DE L'IMAGE PAR THREADS****/
-						int begin=0;
-						int nrows_local = image.rows/nb_threads;
+						/*****SPLIT THE IMAGE PER THREADS****/
+						int begin=0; // id of the first row for each thread
+						int nrows_local = image.rows/nb_threads; // nb of rows to be handeled per thread
 						int reste = image.rows%nb_threads;
 						if((int)id_thread<reste)
 						{
@@ -73,7 +76,8 @@ namespace PPTP
 						else
 						{
 							begin=id_thread*nrows_local + reste;
-						}	
+						}
+						// each thread deal with it own part of the image
 						for(int i=begin;i<begin + nrows_local;i++)
 						{
 							
@@ -82,24 +86,25 @@ namespace PPTP
 							{
 								// CALCUL NEAREST CENTROID
 							
-								centroid_id = calc_closest_centroid(image, i, j);
-								auto pixel_coord = std::make_tuple(i,j);
-								if(collection_centroids_ids[i*image.cols+j]!= centroid_id)
+								centroid_id = calc_closest_centroid(image, i, j); // find the centroid id associated with the current pixel
+								auto pixel_coord = std::make_tuple(i,j); // get the pixel coordinate
+								if(collection_centroids_ids[i*image.cols+j]!= centroid_id)  // if the pixel is already associated with this centroid we skip the update
 								{
 									compteur++;	
-									centroids_convergence=false;
-									collection_centroids_ids[i*image.cols+j]=centroid_id;
-									collection_pixel[i*image.cols+j]=pixel_coord;
+									centroids_convergence=false; // the convergence is not reached since there is a centroid update
+									collection_centroids_ids[i*image.cols+j]=centroid_id; // we update the centroid associated to the current pixel
+									collection_pixel[i*image.cols+j]=pixel_coord; // not used
 								}	
 								{
-									centroids_occurences[centroid_id+id_thread*m_nb_centroid]++;
-									updated_centroids[centroid_id+id_thread*m_nb_centroid]+=image.at<uchar>(i,j);
+									centroids_occurences[centroid_id+id_thread*m_nb_centroid]++;  //increase the occurence of that centroid in the current thread
+									updated_centroids[centroid_id+id_thread*m_nb_centroid]+=image.at<uchar>(i,j); // add the value of the current pixel associated with the current centroid (used to compute the mean i.E the new color value of the current centroid)
 								}						
 							}	
 						}
 					});
 					break;
 				}
+				// same as above but for 3 channel
 				case 3:
 				{			
 					Mat_<Vec3b> _I = image;
@@ -149,35 +154,40 @@ namespace PPTP
 				}
 			}
 
-			return centroids_convergence;
+			return centroids_convergence; // return the state of the convergence
 		}
-
+		
+		// update the values of the centroids 
 		void update_centroids_tbb(cv::Mat& image)
 		{
 			using namespace cv;
 	
-			std::vector<double> updated_centroids_reduced;
-			std::vector<double> centroids_occurences_reduced;
+			std::vector<double> updated_centroids_reduced; //reduce the value of the centroids across the different threads
+			std::vector<double> centroids_occurences_reduced; //reduce the occurence value of the centroids across the different threads
 			
 			centroids_occurences_reduced.resize(m_nb_centroid);
 			updated_centroids_reduced.resize(m_nb_centroid*nb_channels);
 			
 			switch(nb_channels)
 			{
+				// if 1 color channel
 				case 1:
 				{
+					// for each centroid
 					for(int c=0; c<m_nb_centroid; c++)
 					{
+						// for each thread
 						for(int id=0;id<nb_threads;id++)
 						{
-							centroids_occurences_reduced[c]+=centroids_occurences[c+id*m_nb_centroid];
-							updated_centroids_reduced[c]+=updated_centroids[c+id*m_nb_centroid];
+							centroids_occurences_reduced[c]+=centroids_occurences[c+id*m_nb_centroid]; // reduce (sumup) the occurence values of each centroid across each thread
+							updated_centroids_reduced[c]+=updated_centroids[c+id*m_nb_centroid]; // reduce (sumup) the values of each centroid across each thread
 						}
 						if(centroids_occurences_reduced[c] !=0)
-							updated_centroids_reduced[c]/=centroids_occurences_reduced[c];
+							updated_centroids_reduced[c]/=centroids_occurences_reduced[c]; // compute the mean of centroid to get the real value of each centroid
 					}
 					break;
 				}
+				// same as above but for 3 channels
 				case 3:
 				{
 					Mat_<Vec3b> _I = image;
@@ -208,11 +218,12 @@ namespace PPTP
 			for(unsigned int i=0; i<updated_centroids_reduced.size(); i++)
 			{
 				//cout<<" delta centroid: "<<(uchar)updated_centroids[i]-m_centroids[i]<<endl;
-				m_centroids[i]=(uchar)updated_centroids_reduced[i];
+				m_centroids[i]=(uchar)updated_centroids_reduced[i]; // change the type to uchar
 			}
 
  		}
-
+		
+		// segmente the image
 		void compute_segmentation_tbb(cv::Mat& image)
 		{
                       using namespace cv ;
@@ -228,7 +239,7 @@ namespace PPTP
 		            		for(int j=0;j<image.cols;++j)
 		           	 	{
 						cluster_id=collection_centroids_ids[i*image.cols+j];
-			      			image.at<uchar>(i,j)=m_centroids[cluster_id];
+			      			image.at<uchar>(i,j)=m_centroids[cluster_id]; // each pixel get the color of it's own centroid
 		            		}
 		          	});
 		          	break ;
@@ -253,7 +264,8 @@ namespace PPTP
 		          	break ;
 		      }
 		}
-
+		
+		// clustering algo
 		void process_tbb(cv::Mat& image)
 		{
 			std::cout<<"Start process"<<std::endl;
@@ -277,7 +289,7 @@ namespace PPTP
 
 	private :
 
-		
+		// generate random centroids
 		void init_centroid(Mat& image){
 		      	collection_centroids_ids.resize(image.rows*image.cols);
 			collection_pixel.resize(image.rows*image.cols);
@@ -336,7 +348,8 @@ namespace PPTP
 			}
 
 		}
-
+		
+		// calc the closest centroid to a pixel according to its coordinates 
 		int calc_closest_centroid(cv::Mat const& image, int i, int j){
 		
 			
@@ -388,14 +401,14 @@ namespace PPTP
 			return id_centroid;
 		}
 
-	    	int nb_channels  =3  ;
-		int m_nb_centroid = 0 ;
-		int nb_iterations = 50;
-		int compteur =0; //utile seulement pour debugger
-		int nb_threads=1;
-		std::vector<uchar> m_centroids ;
-		std::vector<std::tuple<int,int>> collection_pixel;
-		std::vector<int> collection_centroids_ids;
+	    	int nb_channels  =3  ; // nb of color channels (1 or 3)
+		int m_nb_centroid = 0 ; // nb of centroids
+		int nb_iterations = 50; // nb of iterations
+		int compteur =0; //used only for debug
+		int nb_threads=1; // nb of threads 
+		std::vector<uchar> m_centroids ; // centroid color values (size= nb_centroids * nb_channels)
+		std::vector<std::tuple<int,int>> collection_pixel; //not used (should be removed)
+		std::vector<int> collection_centroids_ids; // contain the centroid ids associated to each pixel (the vector is of the size of the image i.e flatened image)
 
 		std::vector<double> updated_centroids;
 		std::vector<double> centroids_occurences;
