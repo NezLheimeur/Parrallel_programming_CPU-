@@ -7,7 +7,7 @@ to do:
  CMAKE file
 
 
-The pictures below show the results on different quality images for different number of threads
+The pictures below show the results on a 4K image for different number of threads
 
 
 
